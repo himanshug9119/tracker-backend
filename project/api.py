@@ -8,6 +8,7 @@ api_bp = Blueprint('api_bp', __name__)
 db = models.db
 
 # --- Email Campaign Management ---
+
 @api_bp.route('/campaigns', methods=['POST'])
 @login_required
 def create_campaign():
@@ -24,12 +25,19 @@ def create_campaign():
         'open_count': 0
     }
     result = db.campaigns.insert_one(campaign)
-    campaign['_id'] = str(result.inserted_id) # This is the new 'uid'
+    
+    # --- FIX IS HERE ---
+    # After inserting, the 'campaign' dictionary still has an ObjectId.
+    # We need to convert it to a string before sending it as JSON.
+    campaign['_id'] = str(result.inserted_id)
+    campaign['user_id'] = str(campaign['user_id']) # Also convert the user_id
+
     return jsonify(campaign), 201
 
 @api_bp.route('/campaigns', methods=['GET'])
 @login_required
 def get_campaigns():
+    # This function was already correct, no changes needed.
     campaigns_cursor = db.campaigns.find({'user_id': ObjectId(current_user.id)}).sort('created_at', -1)
     campaigns_list = []
     for c in campaigns_cursor:
@@ -41,6 +49,7 @@ def get_campaigns():
 @api_bp.route('/campaigns/<campaign_id>/status', methods=['PUT'])
 @login_required
 def toggle_campaign_status(campaign_id):
+    # This function doesn't return the object, so it's fine.
     data = request.get_json()
     new_status = 'active' if data.get('status') == 'active' else 'inactive'
     
@@ -55,6 +64,7 @@ def toggle_campaign_status(campaign_id):
 
 
 # --- Tracked Link Management ---
+
 @api_bp.route('/links', methods=['POST'])
 @login_required
 def create_link():
@@ -73,12 +83,18 @@ def create_link():
         'click_count': 0
     }
     result = db.tracked_links.insert_one(link)
+
+    # --- FIX IS HERE ---
+    # Convert ObjectIds to strings before returning JSON
     link['_id'] = str(result.inserted_id)
+    link['user_id'] = str(link['user_id'])
+    
     return jsonify(link), 201
 
 @api_bp.route('/links', methods=['GET'])
 @login_required
 def get_links():
+    # This function was already correct, but let's ensure consistency.
     links_cursor = db.tracked_links.find({'user_id': ObjectId(current_user.id)}).sort('created_at', -1)
     links_list = []
     for l in links_cursor:
@@ -87,4 +103,19 @@ def get_links():
         links_list.append(l)
     return jsonify(links_list)
 
-# --- Add other management routes like for link status toggle... ---
+# You can add other management routes here later, like for toggling link status.
+# For example:
+@api_bp.route('/links/<link_id>/status', methods=['PUT'])
+@login_required
+def toggle_link_status(link_id):
+    data = request.get_json()
+    new_status = 'active' if data.get('status') == 'active' else 'inactive'
+    
+    result = db.tracked_links.update_one(
+        {'_id': ObjectId(link_id), 'user_id': ObjectId(current_user.id)},
+        {'$set': {'status': new_status}}
+    )
+
+    if result.matched_count == 0:
+        return jsonify({"error": "Link not found or unauthorized"}), 404
+    return jsonify({"message": f"Link status updated to {new_status}"})
