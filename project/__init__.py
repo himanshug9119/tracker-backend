@@ -17,7 +17,17 @@ def create_app(config_class=Config):
     app.config.from_object(config_class)
 
     # --- Initialize Extensions with the App ---
-    cors.init_app(app, supports_credentials=True) # supports_credentials is key for sessions
+
+    # --- START OF THE FIX ---
+    allowed_origins = [
+        "http://localhost:5173",  # Your Vite dev server
+        "http://127.0.0.1:5173", # Another way to access the dev server
+        # "https://your-deployed-frontend.com" # TODO: Add this when you deploy the frontend
+    ]
+
+    # Configure CORS with the specific origins and support for credentials (cookies)
+    CORS(app, origins=allowed_origins, supports_credentials=True)
+
     bcrypt.init_app(app)
     login_manager.init_app(app)
     
