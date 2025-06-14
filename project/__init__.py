@@ -17,7 +17,11 @@ def create_app(config_class=Config):
     app.config.from_object(config_class)
 
     # --- Initialize Extensions with the App ---
-
+    app.config.update(
+        SESSION_COOKIE_SAMESITE='None', # Allows the cookie to be sent from different sites
+        SESSION_COOKIE_SECURE=True,     # Requires HTTPS, which Render provides
+        SESSION_COOKIE_HTTPONLY=True    # Prevents client-side JS from accessing the cookie
+    )
     # --- START OF THE FIX ---
     allowed_origins = [
         "http://localhost:5173",  # Your Vite dev server
