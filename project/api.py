@@ -21,23 +21,18 @@ def create_campaign():
         'name': name,
         'user_id': ObjectId(current_user.id),
         'created_at': datetime.utcnow(),
-        'status': 'active',
+        'status': 'active',  # --- MODIFICATION: Default status
         'open_count': 0
     }
     result = db.campaigns.insert_one(campaign)
     
-    # --- FIX IS HERE ---
-    # After inserting, the 'campaign' dictionary still has an ObjectId.
-    # We need to convert it to a string before sending it as JSON.
     campaign['_id'] = str(result.inserted_id)
-    campaign['user_id'] = str(campaign['user_id']) # Also convert the user_id
-
+    campaign['user_id'] = str(campaign['user_id'])
     return jsonify(campaign), 201
 
 @api_bp.route('/campaigns', methods=['GET'])
 @login_required
 def get_campaigns():
-    # This function was already correct, no changes needed.
     campaigns_cursor = db.campaigns.find({'user_id': ObjectId(current_user.id)}).sort('created_at', -1)
     campaigns_list = []
     for c in campaigns_cursor:
@@ -46,12 +41,12 @@ def get_campaigns():
         campaigns_list.append(c)
     return jsonify(campaigns_list)
 
+# --- NEW ENDPOINT ---
 @api_bp.route('/campaigns/<campaign_id>/status', methods=['PUT'])
 @login_required
 def toggle_campaign_status(campaign_id):
-    # This function doesn't return the object, so it's fine.
     data = request.get_json()
-    new_status = 'active' if data.get('status') == 'active' else 'inactive'
+    new_status = 'active' if data.get('status') is True else 'inactive'
     
     result = db.campaigns.update_one(
         {'_id': ObjectId(campaign_id), 'user_id': ObjectId(current_user.id)},
@@ -79,22 +74,18 @@ def create_link():
         'destination_url': destination_url,
         'user_id': ObjectId(current_user.id),
         'created_at': datetime.utcnow(),
-        'status': 'active',
+        'status': 'active',  # --- MODIFICATION: Default status
         'click_count': 0
     }
     result = db.tracked_links.insert_one(link)
-
-    # --- FIX IS HERE ---
-    # Convert ObjectIds to strings before returning JSON
+    
     link['_id'] = str(result.inserted_id)
     link['user_id'] = str(link['user_id'])
-    
     return jsonify(link), 201
 
 @api_bp.route('/links', methods=['GET'])
 @login_required
 def get_links():
-    # This function was already correct, but let's ensure consistency.
     links_cursor = db.tracked_links.find({'user_id': ObjectId(current_user.id)}).sort('created_at', -1)
     links_list = []
     for l in links_cursor:
@@ -103,13 +94,12 @@ def get_links():
         links_list.append(l)
     return jsonify(links_list)
 
-# You can add other management routes here later, like for toggling link status.
-# For example:
+# --- NEW ENDPOINT ---
 @api_bp.route('/links/<link_id>/status', methods=['PUT'])
 @login_required
 def toggle_link_status(link_id):
     data = request.get_json()
-    new_status = 'active' if data.get('status') == 'active' else 'inactive'
+    new_status = 'active' if data.get('status') is True else 'inactive'
     
     result = db.tracked_links.update_one(
         {'_id': ObjectId(link_id), 'user_id': ObjectId(current_user.id)},
@@ -119,3 +109,34 @@ def toggle_link_status(link_id):
     if result.matched_count == 0:
         return jsonify({"error": "Link not found or unauthorized"}), 404
     return jsonify({"message": f"Link status updated to {new_status}"})
+
+
+# --- DASHBOARD STATS ---
+@api_bp.route('/stats/summary')
+@login_required
+def get_summary_stats():
+    user_id = ObjectId(current_user.id)
+    
+    total_campaigns = db.campaigns.count_documents({'user_id': user_id})
+    total_links = db.tracked_links.count_documents({'user_id': user_id})
+
+    opens_pipeline = [
+        {'$match': {'user_id': user_id}},
+        {'$group': {'_id': '$user_id', 'total_opens': {'$sum': '$open_count'}}}
+    ]
+    opens_result = list(db.campaigns.aggregate(opens_pipeline))
+    total_opens = opens_result[0]['total_opens'] if opens_result else 0
+
+    clicks_pipeline = [
+        {'$match': {'user_id': user_id}},
+        {'$group': {'_id': '$user_id', 'total_clicks': {'$sum': '$click_count'}}}
+    ]
+    clicks_result = list(db.tracked_links.aggregate(clicks_pipeline))
+    total_clicks = clicks_result[0]['total_clicks'] if clicks_result else 0
+
+    return jsonify({
+        'total_campaigns': total_campaigns,
+        'total_links': total_links,
+        'total_opens': total_opens,
+        'total_clicks': total_clicks
+    })
