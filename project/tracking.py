@@ -1,3 +1,5 @@
+# project/tracking.py
+
 from flask import Blueprint, request, redirect, send_file
 from . import models
 from datetime import datetime
@@ -12,7 +14,6 @@ db = models.db
 
 def get_ip_info(ip_address: str) -> dict:
     try:
-        # Access config safely from the application context
         from flask import current_app
         api_key = current_app.config['ABSTRACT_API_KEY']
         
@@ -21,12 +22,11 @@ def get_ip_info(ip_address: str) -> dict:
         if response.status_code == 200:
             data = response.json()
             return {
-                'city': data.get('city'), 'country': data.get('country'),
+                'city': data.get('city'), 'country': data.get('country'), 'country_code': data.get('country_code'),
                 'isp': data.get('connection', {}).get('isp_name')
             }
     except Exception as e:
         print(f"IP info lookup failed: {e}")
-        return {}
     return {}
 
 @tracking_bp.route('/track')
@@ -43,25 +43,24 @@ def track_open():
 
     if is_google_proxy:
         try:
-            # --- MODIFICATION START ---
-            # Check if the campaign exists AND is active before logging
             campaign = db.campaigns.find_one({'_id': ObjectId(uid), 'user_id': ObjectId(user.id)})
             
             if not campaign or campaign.get('status') != 'active':
-                # If campaign is inactive or doesn't exist, do nothing but return the pixel.
-                print(f"Ignoring open for inactive/non-existent campaign: {uid}")
                 return send_file(io.BytesIO(TRANSPARENT_PNG), mimetype='image/png')
-            # --- MODIFICATION END ---
 
             ip_address = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
             now = datetime.utcnow()
             geo_info = get_ip_info(ip_address)
             
+            # --- USING STANDARDIZED 'campaign_id' FIELD ---
             db.open_events.insert_one({
-                'campaign_id': ObjectId(uid),
+                'campaign_id': ObjectId(uid), # CORRECT
                 'user_id': ObjectId(user.id),
-                'ip': ip_address, 'user_agent': user_agent,
-                'opened_at': now, 'geo_info': geo_info
+                'ip': ip_address,
+                'user_agent': user_agent,
+                'opened_at': now,
+                'geo_info': geo_info,
+                'is_real_open': True
             })
             
             db.campaigns.update_one({'_id': ObjectId(uid)}, {'$inc': {'open_count': 1}})
@@ -83,29 +82,27 @@ def track_click():
         
     user = models.User.find_by_api_key(api_key) if api_key else None
     if not user or not uid:
-        # Still redirect, but don't track
         return redirect(dest_url, code=302)
 
     try:
-        # --- MODIFICATION START ---
-        # Check if the tracked link exists AND is active
         tracked_link = db.tracked_links.find_one({'_id': ObjectId(uid), 'user_id': ObjectId(user.id)})
 
         if not tracked_link or tracked_link.get('status') != 'active':
-            print(f"Ignoring click for inactive/non-existent link: {uid}")
             return redirect(dest_url, code=302)
-        # --- MODIFICATION END ---
         
         ip_address = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
         now = datetime.utcnow()
         geo_info = get_ip_info(ip_address)
         
+        # --- USING STANDARDIZED 'link_id' FIELD ---
         db.click_events.insert_one({
-            'link_id': ObjectId(uid),
+            'link_id': ObjectId(uid), # CORRECT
             'user_id': ObjectId(user.id),
             'destination_url': dest_url,
-            'ip': ip_address, 'user_agent': request.headers.get('User-Agent', ''),
-            'clicked_at': now, 'geo_info': geo_info
+            'ip': ip_address,
+            'user_agent': request.headers.get('User-Agent', ''),
+            'clicked_at': now,
+            'geo_info': geo_info
         })
         
         db.tracked_links.update_one({'_id': ObjectId(uid)}, {'$inc': {'click_count': 1}})
