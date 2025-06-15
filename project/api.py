@@ -1,9 +1,10 @@
 from flask import Blueprint, request, jsonify
 from flask_login import login_required, current_user
 from bson import ObjectId
+from collections import Counter
 from datetime import datetime
 from . import models
-
+from datetime import timedelta
 api_bp = Blueprint('api_bp', __name__)
 db = models.db
 
@@ -162,3 +163,51 @@ def get_summary_stats():
     clicks_result = list(db.tracked_links.aggregate(clicks_pipeline))
     total_clicks = clicks_result[0]['total_clicks'] if clicks_result else 0
     return jsonify({'total_campaigns': total_campaigns, 'total_links': total_links, 'total_opens': total_opens, 'total_clicks': total_clicks})
+
+
+# --- NEW ANALYTICS ENDPOINTS ---
+
+@api_bp.route('/analytics/email')
+@login_required
+def get_email_analytics_overview():
+    """Provides aggregated analytics for ALL email campaigns for the user."""
+    user_id = ObjectId(current_user.id)
+
+    # Aggregate opens per day for the last 30 days
+    opens_by_day = list(db.open_events.aggregate([
+        {'$match': {
+            'user_id': user_id,
+            'is_real_open': True, # Only count real opens
+            'opened_at': {'$gte': datetime.utcnow() - timedelta(days=30)}
+        }},
+        {'$project': {
+            'date': {'$dateToString': {'format': '%Y-%m-%d', 'date': '$opened_at'}}
+        }},
+        {'$group': {'_id': '$date', 'count': {'$sum': 1}}},
+        {'$sort': {'_id': 1}}
+    ]))
+    
+    # Aggregate top 5 countries
+    top_countries = list(db.open_events.aggregate([
+        {'$match': {'user_id': user_id, 'is_real_open': True, 'geo_info.country': {'$ne': None}}},
+        {'$group': {'_id': '$geo_info.country', 'count': {'$sum': 1}}},
+        {'$sort': {'count': -1}},
+        {'$limit': 5}
+    ]))
+
+    # Get recent open events
+    recent_opens = list(db.open_events.find(
+        {'user_id': user_id, 'is_real_open': True}
+    ).sort('opened_at', -1).limit(10))
+    # Convert ObjectIds to strings for recent opens
+    for event in recent_opens:
+        event['_id'] = str(event['_id'])
+        event['user_id'] = str(event['user_id'])
+        event['campaign_id'] = str(event['campaign_id'])
+
+
+    return jsonify({
+        'opens_by_day': opens_by_day,
+        'top_countries': top_countries,
+        'recent_opens': recent_opens
+    })
